@@ -1,0 +1,52 @@
+#!/bin/sh
+# piano: repair the apps-SMMU stream matches, enable the UFS reference clock and
+# load the UFS stack — before the initramfs looks for the root device.
+#
+# Mirrors /pianoinit from the piano mainline project (debian-piano).  Everything
+# here is best effort except the SMMU repair, which the DMA masters depend on.
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case $1 in
+	prereqs) prereqs; exit 0 ;;
+esac
+
+. /scripts/functions
+
+SMMU=/usr/lib/piano/piano-qup-smmu
+
+log_begin_msg "piano: apps-SMMU stream matches (QUP1 GPI DMA + ADSP)"
+if [ -x "$SMMU" ]; then
+	# QUP1 GPI DMA (0xb6), QUP1 SE (0xa3), PCIe0 requesters, and three more
+	# streams the display/camera paths use.
+	$SMMU 0xb6 0xa3 0x1400/0x7f 0x436 0x423 0x60 > /run/piano-qup-smmu.log 2>&1 || \
+		log_warning_msg "piano: SMMU repair failed, see /run/piano-qup-smmu.log"
+	# ADSP DMA streams, exactly the stock iommus values (audio-ion, then the
+	# fastrpc compute contexts).  Non-fatal: without them only audio and
+	# sensors would fault.
+	$SMMU 0x1001/0x80 0x1041/0x20 0x1003/0x80 0x1043/0x20 \
+	      0x1004/0x80 0x1044/0x20 0x1005/0x80 0x1045/0x20 \
+	      0x1006/0x80 0x1046/0x20 0x1007/0x40 0x1067 0x1087 \
+	      0x1008/0x80 0x1048/0x20 >> /run/piano-qup-smmu.log 2>&1 || \
+		log_warning_msg "piano: ADSP SMMU streams failed, see /run/piano-qup-smmu.log"
+else
+	log_warning_msg "piano: $SMMU missing, DMA masters may fault"
+fi
+log_end_msg
+
+log_begin_msg "piano: UFS reference clock"
+# Stock TCSR base 0x0f204008 + the upstream UFS CLKREF offset 0x1000.
+if [ -x /bin/busybox ]; then
+	v=$(busybox devmem 0x0f205008 32 2>/dev/null) && \
+		busybox devmem 0x0f205008 32 "$((v | 1))" 2>/dev/null && \
+		log_success_msg "  clkref enabled" || log_warning_msg "  devmem failed"
+else
+	log_warning_msg "  no busybox devmem in the initramfs"
+fi
+log_end_msg
+
+log_begin_msg "piano: UFS host and PHY"
+modprobe phy_qcom_qmp_ufs || log_warning_msg "piano: UFS PHY module failed"
+modprobe ufs_qcom || log_warning_msg "piano: UFS host module failed"
+log_end_msg
+
+exit 0

@@ -1,0 +1,32 @@
+#!/bin/sh
+# piano: put the storage bring-up into the initramfs.
+#
+# The apps SMMU has no mainline driver, so the SMR/S2CR tables have to be
+# repaired before the UFS (or any other DMA master) probes; that repair and the
+# UFS modules therefore live in the initramfs, not in the rootfs.
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case $1 in
+	prereqs) prereqs; exit 0 ;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+copy_exec /usr/lib/piano/piano-qup-smmu /usr/lib/piano
+copy_exec /usr/lib/piano/usb-network /usr/lib/piano
+
+# busybox devmem pokes the UFS reference clock (TCSR).
+if [ -x /bin/busybox ]; then
+	copy_exec /bin/busybox /bin
+elif [ -x /usr/bin/busybox ]; then
+	copy_exec /usr/bin/busybox /bin
+fi
+
+# UFS host + PHY stay modules on purpose: they must not probe before the SMMU
+# repair above has run.  manual_add_modules pulls in their dependencies.
+manual_add_modules phy_qcom_qmp_ufs
+manual_add_modules ufs_qcom
+manual_add_modules ufshcd_pltfrm
+manual_add_modules ufshcd_core
+
+exit 0

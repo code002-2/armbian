@@ -1,0 +1,13 @@
+[Unit]
+Description=piano USB gadget network (NCM debug channel, 10.42.0.2)
+After=local-fs.target
+ConditionPathExists=/sys/class/udc
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/piano/usb-network
+ExecStop=/bin/sh -c 'cd /sys/kernel/config/usb_gadget 2>/dev/null && [ -d piano ] && echo "" > piano/UDC || true'
+
+[Install]
+WantedBy=multi-user.target
